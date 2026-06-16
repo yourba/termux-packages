@@ -37,7 +37,9 @@ jobs:
       - name: Enable 16GB Swap (OOM Protection)
         run: |
           echo "::group::Creating 16GB swap file"
-          sudo fallocate -l 16G /swapfile
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo dd if=/dev/zero of=/swapfile bs=1G count=16 status=progress
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
@@ -52,7 +54,6 @@ jobs:
           echo "::group::Aggressive disk cleanup"
           echo "Before cleanup:"
           df -h
-          
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf "/usr/local/share/boost"
@@ -64,7 +65,6 @@ jobs:
           sudo rm -rf /opt/hostedtoolcache/Python
           sudo rm -rf /opt/hostedtoolcache/Ruby
           sudo docker image prune --all --force 2>/dev/null || true
-          
           echo "After cleanup:"
           df -h
           echo "::endgroup::"
@@ -91,7 +91,7 @@ jobs:
           path: |
             ~/.termux-build
             output
-          key: termux-build-${{ matrix.arch }}-v2
+          key: termux-build-${{ matrix.arch }}-v5
           restore-keys: |
             termux-build-${{ matrix.arch }}-
 
@@ -113,7 +113,6 @@ jobs:
           echo "Architecture: $ARCH"
           echo "::endgroup::"
           
-          # Resource monitoring script
           cat > /tmp/monitor-resources.sh << 'MONEOF'
           #!/bin/bash
           while true; do
@@ -168,12 +167,18 @@ jobs:
         if: success()
         run: |
           echo "::group::Generating checksums"
-          cd output && sha256sum bootstrap-*.zip > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          cd output
+          if [ -f bootstrap-${{ matrix.arch }}.zip ]; then
+            sha256sum bootstrap-${{ matrix.arch }}.zip > SHA256SUMS.txt
+            cat SHA256SUMS.txt
+          else
+            echo "WARNING: bootstrap.zip not found, skipping checksum generation"
+            ls -la
+          fi
           echo "::endgroup::"
 
       - name: Upload artifacts
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bootstrap-${{ matrix.arch }}
