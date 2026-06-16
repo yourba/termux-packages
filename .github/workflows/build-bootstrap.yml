@@ -1,0 +1,202 @@
+name: Build Termux Bootstrap
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Target architecture'
+        required: false
+        default: 'aarch64'
+        type: choice
+        options:
+          - aarch64
+          - arm
+          - i686
+          - x86_64
+          - all
+env:
+  TERMUX_APP_PACKAGE: com.vchangxiao.pystudio
+  DEFAULT_ARCH: aarch64
+jobs:
+  build-bootstrap:
+    name: Build Bootstrap (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Enable 16GB Swap (OOM Protection)
+        run: |
+          echo "::group::Creating 16GB swap file"
+          sudo fallocate -l 16G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "Swap enabled:"
+          sudo swapon --show
+          echo "Memory status:"
+          free -h
+          echo "::endgroup::"
+
+      - name: Aggressive Disk Space Cleanup
+        run: |
+          echo "::group::Aggressive disk cleanup"
+          echo "Before cleanup:"
+          df -h
+          
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /opt/hostedtoolcache/Python
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo docker image prune --all --force 2>/dev/null || true
+          
+          echo "After cleanup:"
+          df -h
+          echo "::endgroup::"
+
+      - name: Cache Docker images
+        uses: actions/cache@v4
+        with:
+          path: /var/lib/docker
+          key: docker-termux-builder-v1
+          restore-keys: |
+            docker-termux-builder-
+
+      - name: Cache NDK and build tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/lib/android-ndk-*
+            ~/lib/android-sdk-*
+          key: ndk-sdk-v1
+
+      - name: Cache package builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.termux-build
+            output
+          key: termux-build-${{ matrix.arch }}-v2
+          restore-keys: |
+            termux-build-${{ matrix.arch }}-
+
+      - name: Setup Docker
+        run: |
+          echo "::group::Setting up Docker"
+          echo '{"experimental": true}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          sleep 3
+          docker info 2>&1 | head -20
+          docker pull ghcr.io/termux/package-builder:latest 2>&1 | tail -5
+          echo "::endgroup::"
+
+      - name: Build Bootstrap
+        run: |
+          ARCH=${{ matrix.arch }}
+          echo "::group::Build Configuration"
+          echo "Package: ${{ env.TERMUX_APP_PACKAGE }}"
+          echo "Architecture: $ARCH"
+          echo "::endgroup::"
+          
+          # Resource monitoring script
+          cat > /tmp/monitor-resources.sh << 'MONEOF'
+          #!/bin/bash
+          while true; do
+            sleep 300
+            echo "=== RESOURCE MONITOR - $(date) ==="
+            echo "--- Memory ---"
+            free -h
+            echo "--- Disk ---"
+            df -h
+            echo "--- Top processes ---"
+            ps aux --sort=-%mem | head -10
+            echo "=================================="
+          done
+          MONEOF
+          chmod +x /tmp/monitor-resources.sh
+          /tmp/monitor-resources.sh &
+          MONITOR_PID=$!
+          
+          cat > /tmp/configure-pip.sh << 'PIPEOF'
+          mkdir -p ~/.config/pip
+          echo -e "[global]\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\ntrusted-host = pypi.tuna.tsinghua.edu.cn" > ~/.config/pip/pip.conf
+          PIPEOF
+          chmod +x /tmp/configure-pip.sh
+          
+          echo "::group::Building bootstrap (full log)"
+          echo "Starting resource monitor in background (PID: $MONITOR_PID)"
+          
+          docker run --rm \
+            --memory=6g \
+            --memory-swap=16g \
+            --privileged \
+            --device /dev/fuse \
+            --cap-add SYS_ADMIN \
+            --security-opt apparmor:unconfined \
+            -v ${{ github.workspace }}:/home/builder/termux-packages \
+            -v /tmp/configure-pip.sh:/tmp/configure-pip.sh \
+            -w /home/builder/termux-packages \
+            ghcr.io/termux/package-builder:latest \
+            bash -c "bash /tmp/configure-pip.sh && ./scripts/build-bootstraps.sh --architectures $ARCH"
+          
+          echo "::endgroup::"
+          kill $MONITOR_PID 2>/dev/null || true
+
+      - name: Build output
+        if: always()
+        run: |
+          echo "::group::Build output files"
+          ls -la output/ 2>/dev/null || echo "No output directory"
+          echo "::endgroup::"
+
+      - name: Generate checksums
+        if: success()
+        run: |
+          echo "::group::Generating checksums"
+          cd output && sha256sum bootstrap-*.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          echo "::endgroup::"
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-${{ matrix.arch }}
+          path: |
+            output/bootstrap-${{ matrix.arch }}.zip
+            output/SHA256SUMS.txt
+          retention-days: 90
+
+      - name: Create Release
+        if: success() && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: bootstrap-v${{ github.run_number }}
+          name: Bootstrap ${{ env.TERMUX_APP_PACKAGE }} - Build ${{ github.run_number }}
+          body: |
+            **Package**: `${{ env.TERMUX_APP_PACKAGE }}`
+            **Arch**: `${{ matrix.arch }}`
+            **SHA256**:
+            ```
+            ${{ hashFiles('output/SHA256SUMS.txt') }}
+            ```
+          files: |
+            output/bootstrap-${{ matrix.arch }}.zip
+            output/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
