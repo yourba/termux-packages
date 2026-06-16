@@ -151,7 +151,7 @@ jobs:
             -v /tmp/configure-pip.sh:/tmp/configure-pip.sh \
             -w /home/builder/termux-packages \
             ghcr.io/termux/package-builder:latest \
-            bash -c "bash /tmp/configure-pip.sh && ./scripts/build-bootstraps.sh --architectures $ARCH"
+            bash -c "bash /tmp/configure-pip.sh && chmod +x scripts/build-bootstraps.sh && ./scripts/build-bootstraps.sh --architectures $ARCH"
           
           echo "::endgroup::"
           kill $MONITOR_PID 2>/dev/null || true
