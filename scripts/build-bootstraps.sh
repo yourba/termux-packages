@@ -457,6 +457,7 @@ main() {
 		PACKAGES+=("bash") # Used by `termux-bootstrap-second-stage.sh`
 		if ! ${BOOTSTRAP_ANDROID10_COMPATIBLE}; then
 			PACKAGES+=("command-not-found")
+			PACKAGES+=("proot")
 		else
 			PACKAGES+=("proot")
 		fi
