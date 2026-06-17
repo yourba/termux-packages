@@ -243,30 +243,6 @@ create_bootstrap_archive() {
 			rm -f "$link"
 		done < <(find . -type l -print0)
 
-		# === Bootstrap size optimization (Task 5) ===
-		echo "[*] Cleaning up unnecessary files to reduce size..."
-
-		# Remove man pages, documentation, locale, info
-		rm -rf share/man share/doc share/locale share/info share/gtk-doc 2>/dev/null || true
-
-		# Remove static libraries (not needed for bootstrap)
-		find lib -name "*.a" -type f -delete 2>/dev/null || true
-
-		# Remove .la libtool archive files
-		find lib -name "*.la" -type f -delete 2>/dev/null || true
-
-		# Remove Python bytecode cache (if any)
-		find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-
-		# Strip ELF binaries and shared libraries (remove debug symbols)
-		STRIP_CMD=$(command -v aarch64-linux-android-strip || command -v arm-linux-androideabi-strip || command -v i686-linux-android-strip || command -v x86_64-linux-android-strip || command -v strip || true)
-		if [ -n "$STRIP_CMD" ]; then
-			find bin -type f -exec $STRIP_CMD --strip-unneeded {} + 2>/dev/null || true
-			find lib -name "*.so*" -exec $STRIP_CMD --strip-unneeded {} + 2>/dev/null || true
-			find libexec -type f -exec $STRIP_CMD --strip-unneeded {} + 2>/dev/null || true
-		fi
-		echo "[*] Cleanup complete."
-
 		zip -r9 "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" ./*
 	)
 
@@ -457,7 +433,6 @@ main() {
 		PACKAGES+=("bash") # Used by `termux-bootstrap-second-stage.sh`
 		if ! ${BOOTSTRAP_ANDROID10_COMPATIBLE}; then
 			PACKAGES+=("command-not-found")
-			PACKAGES+=("proot")
 		else
 			PACKAGES+=("proot")
 		fi
