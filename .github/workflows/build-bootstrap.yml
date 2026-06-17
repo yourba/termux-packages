@@ -22,6 +22,8 @@ jobs:
   build-bootstrap:
     name: Build Bootstrap (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 180
     strategy:
       fail-fast: false
