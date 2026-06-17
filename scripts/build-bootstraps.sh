@@ -243,20 +243,6 @@ create_bootstrap_archive() {
 			rm -f "$link"
 		done < <(find . -type l -print0)
 
-		# === Bootstrap size optimization ===
-		echo "[*] Cleaning up unnecessary files to reduce size..."
-		rm -rf share/man share/doc share/locale share/info share/gtk-doc 2>/dev/null || true
-		find lib -name "*.a" -type f -delete 2>/dev/null || true
-		find lib -name "*.la" -type f -delete 2>/dev/null || true
-		find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-		STRIP_CMD=$(command -v strip || true)
-		if [ -n "$STRIP_CMD" ]; then
-			find bin -type f -exec $STRIP_CMD --strip-unneeded {} + 2>/dev/null || true
-			find lib -name "*.so*" -exec $STRIP_CMD --strip-unneeded {} + 2>/dev/null || true
-			find libexec -type f -exec $STRIP_CMD --strip-unneeded {} + 2>/dev/null || true
-		fi
-		echo "[*] Cleanup complete."
-
 		zip -r9 "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" ./*
 	)
 
